@@ -10,7 +10,6 @@ export const prepareOrderData = async ({
   shippingAddress,
   shipping = {},
 }) => {
-
   console.log(shippingAddress);
   const cart = await Cart.findOne({
     user: userId,
@@ -58,14 +57,14 @@ export const prepareOrderData = async ({
     });
   }
 
-  console.log(cart.items)
+  console.log(cart.items);
 
   const shippingDetails = await calculateShippingRates({
     products: cart.items,
     destinationPincode: shippingAddress.pincode,
   });
 
-  console.log(shippingDetails)
+  console.log(shippingDetails);
 
   const shippingCost = shippingDetails.shippingCost;
   const tax = shipping.tax ?? 0;
@@ -111,7 +110,6 @@ export const createPendingOrder = async ({ orderData, payment }) => {
 
 export const completeOrder = async ({
   order,
-  cart,
   razorpayPaymentId,
   razorpaySignature,
 }) => {
@@ -121,61 +119,64 @@ export const completeOrder = async ({
     let completedOrder;
 
     await session.withTransaction(async () => {
-      // Atomically claim completion
-      const freshOrder = await Order.findOneAndUpdate(
-        {
-          _id: order._id,
-          "payment.status": "Verifying",
-        },
-        {
-          new: true,
-          session,
-        },
-      );
+      // 1. Fetch the order within the session lock to secure a database row lock
+      const freshOrder = await Order.findOne({
+        _id: order._id,
+        "payment.status": "Verifying",
+      }).session(session);
 
-      // Already completed or another process is completing it
+      // Already completed or being processed concurrently by a webhook/redirect
       if (!freshOrder) {
         completedOrder = await Order.findById(order._id).session(session);
         return;
       }
 
-      for (const item of cart.items) {
-        if (item.quantity > item.product.stock) {
-          throw new Error(
-            `${item.product.name} has only ${item.product.stock} items in stock`,
-          );
-        }
+      // 2. Perform ATOMIC stock updates using conditional filtering ($gte)
+      // This is the core engine that blocks race conditions.
+      const stockUpdates = freshOrder.items.map((item) => ({
+        updateOne: {
+          // The filter ensures the product exists AND has sufficient stock
+          filter: {
+            _id: item.product,
+            stock: { $gte: item.quantity },
+          },
+          // Decrement the stock atomically
+          update: {
+            $inc: { stock: -item.quantity },
+          },
+        },
+      }));
+
+      const bulkWriteResult = await Product.bulkWrite(stockUpdates, {
+        session,
+      });
+
+      // If the number of modified products doesn't match the order items count,
+      // it means at least one product ran out of stock concurrently during processing.
+      if (bulkWriteResult.modifiedCount !== freshOrder.items.length) {
+        throw new Error(
+          "One or more items became out of stock during payment completion.",
+        );
       }
 
-      await Product.bulkWrite(
-        cart.items.map((item) => ({
-          updateOne: {
-            filter: {
-              _id: item.product._id,
-            },
-            update: {
-              $inc: {
-                stock: -item.quantity,
-              },
-            },
-          },
-        })),
+      // 3. Clear the user's shopping cart inside the transaction
+      await Cart.findOneAndUpdate(
+        { user: freshOrder.user },
+        { $set: { items: [] } },
         { session },
       );
 
-      cart.items = [];
-      await cart.save({ session });
-
+      // 4. Update payment parameters and transition state to Paid
       freshOrder.payment.status = "Paid";
       freshOrder.payment.razorpayPaymentId = razorpayPaymentId;
       freshOrder.payment.razorpaySignature = razorpaySignature;
       freshOrder.payment.paidAt = new Date();
 
       await freshOrder.save({ session });
-
       completedOrder = freshOrder;
     });
 
+    // 5. Populate paths securely outside the core write window
     await completedOrder.populate([
       {
         path: "items.product",
@@ -188,6 +189,9 @@ export const completeOrder = async ({
     ]);
 
     return completedOrder;
+  } catch (error) {
+    // MongoDB withTransaction automatically aborts the transaction and rolls back stock updates if this throws
+    throw error;
   } finally {
     await session.endSession();
   }

@@ -119,7 +119,7 @@ export const trackShipment = async (req, res) => {
 
     const tracking = await trackShipmentService(order.shipping.awbCode);
 
-    order.shipping.currentStatus = tracking.status;
+    order.shipping.status = tracking.status;
 
     await order.save();
     return res.status(200).json({

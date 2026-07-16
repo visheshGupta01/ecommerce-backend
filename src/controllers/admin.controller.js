@@ -37,7 +37,7 @@ export const getDashboard = async (req, res) => {
       Category.countDocuments(),
 
       User.countDocuments({
-        role: "user",
+        role: "customer",
       }),
 
       Order.countDocuments(),

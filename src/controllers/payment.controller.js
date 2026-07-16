@@ -82,134 +82,115 @@ export const createPaymentOrder = async (req, res) => {
   }
 };
 
+import crypto from "crypto";
+import Order from "../models/Order.js";
+import Cart from "../models/Cart.js";
+import { completeOrder } from "../services/order.service.js";
+import razorpayInstance from "../config/razorpay.js"; // Assuming your configuration exports the instance
+
 export const verifyPayment = async (req, res) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
       req.body;
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing payment details",
-      });
-    }
-
-    const validSignature = verifySignature({
-      razorpayOrderId: razorpay_order_id,
-      razorpayPaymentId: razorpay_payment_id,
-      razorpaySignature: razorpay_signature,
-    });
-
-    if (!validSignature) {
-      await Order.updateOne(
-        {
-          "payment.razorpayOrderId": razorpay_order_id,
-        },
-        {
-          $set: {
-            "payment.status": "Failed",
-            "payment.failureReason": "Signature mismatch",
-          },
-        },
-      );
-
-      return res.status(400).json({
-        success: false,
-        message: "Payment verification failed",
-      });
-    }
-
+    // 1. Find the internal order using the atomic lifecycle status check
     const order = await Order.findOneAndUpdate(
       {
         "payment.razorpayOrderId": razorpay_order_id,
         "payment.status": "Pending",
       },
-      {
-        $set: {
-          "payment.status": "Verifying",
-        },
-      },
-      {
-        new: false,
-      },
+      { $set: { "payment.status": "Verifying" } },
+      { new: false }, // Returns the document BEFORE update so we can reference its initial status
     );
 
     if (!order) {
-      const existing = await Order.findOne({
-        "payment.razorpayOrderId": razorpay_order_id,
-      });
-
-      if (!existing) {
-        return res.status(404).json({
-          success: false,
-          message: "Order not found",
-        });
-      }
-
-      return res.status(409).json({
-        success: false,
-        message: "Payment already verified or being processed",
-      });
-    }
-
-    try {
-      const payment = await verifyRazorpayPayment({
-        razorpayOrderId: razorpay_order_id,
-        razorpayPaymentId: razorpay_payment_id,
-        expectedAmount: order.pricing.total,
-      });
-
-      const cart = await Cart.findOne({
-        user: order.user,
-      }).populate("items.product");
-
-      if (!cart) {
-        throw new Error("Cart not found");
-      }
-
-      const completedOrder = await completeOrder({
-        order,
-        cart,
-        razorpayPaymentId: razorpay_payment_id,
-        razorpaySignature: razorpay_signature,
-      });
-
-      return res.status(200).json({
-        success: true,
-        message: "Payment verified successfully",
-        order: completedOrder,
-      });
-    } catch (error) {
-      await Order.updateOne(
-        {
-          _id: order._id,
-        },
-        {
-          $set: {
-            "payment.status": "Failed",
-            "payment.failureReason": error.message,
-          },
-        },
-      );
-
-      throw error;
-    }
-  } catch (error) {
-    if (
-      error.message === "Cart not found" ||
-      error.message === "Amount mismatch" ||
-      error.message.includes("items in stock")
-    ) {
       return res.status(400).json({
         success: false,
-        message: error.message,
+        message: "Order not found or already processed",
       });
     }
 
-    return res.status(500).json({
-      success: false,
-      message: error.message,
+    // 2. Cryptographic Signature Verification
+    const sign = razorpay_order_id + "|" + razorpay_payment_id;
+    const expectedSign = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(sign.toString())
+      .digest("hex");
+
+    if (razorpay_signature !== expectedSign) {
+      order.payment.status = "Failed";
+      order.payment.failureReason = "Signature verification failed";
+      await order.save();
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid payment signature" });
+    }
+
+    // 3. SECURE PARAMETER VERIFICATION VIA RAZORPAY API Fetch
+    // We fetch the server-to-server transaction context directly from Razorpay's API
+    const razorpayOrderFetch =
+      await razorpayInstance.orders.fetch(razorpay_order_id);
+
+    // Verify order id match (Implicitly handled by fetch, but good explicitly checking properties)
+    if (razorpayOrderFetch.id !== order.payment.razorpayOrderId) {
+      order.payment.status = "Failed";
+      order.payment.failureReason = "Razorpay Order ID mismatch";
+      await order.save();
+      return res
+        .status(400)
+        .json({ success: false, message: "Tampered Order ID token" });
+    }
+
+    // Verify Currency matches INR
+    if (razorpayOrderFetch.currency !== "INR") {
+      order.payment.status = "Failed";
+      order.payment.failureReason = `Invalid currency context: expected INR, received ${razorpayOrderFetch.currency}`;
+      await order.save();
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Only INR transactions are authorized",
+        });
+    }
+
+    // Verify Amount (Note: Razorpay amounts are integer subunits/paise, so multiply total by 100)
+    const expectedAmountPaise = Math.round(order.pricing.total * 100);
+    if (razorpayOrderFetch.amount !== expectedAmountPaise) {
+      order.payment.status = "Failed";
+      order.payment.failureReason = `Amount tampering detected: expected ${expectedAmountPaise} paise, received ${razorpayOrderFetch.amount} paise`;
+      await order.save();
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Transaction total matching evaluation failed",
+        });
+    }
+
+    // 4. Retrieve User Cart to pass forward
+    const cart = await Cart.findOne({ user: order.user });
+    if (!cart) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Cart not found" });
+    }
+
+    // 5. Complete Order via isolated transaction layer (Using snapshot pattern)
+    const completedOrder = await completeOrder({
+      order,
+      razorpayPaymentId: razorpay_payment_id,
+      razorpaySignature: razorpay_signature,
     });
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment verified successfully",
+      order: completedOrder,
+    });
+  } catch (error) {
+    console.error("Payment Verification Exception:", error);
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 

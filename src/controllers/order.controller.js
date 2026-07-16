@@ -64,46 +64,36 @@ export const getAllOrders = async (req, res) => {
   });
 };
 
+// Replacement inside src/controllers/order.controller.js
 export const updateOrderStatus = async (req, res) => {
   try {
-    const { status } = req.body;
-
+    const { paymentStatus, shippingStatus } = req.body;
     const order = await Order.findById(req.params.id);
 
     if (!order) {
-      return res.status(404).json({
-        success: false,
-        message: "Order not found",
-      });
+      return res.status(404).json({ success: false, message: "Order not found" });
     }
 
-    const validStatuses = [
-      "Pending",
-      "Processing",
-      "Shipped",
-      "Delivered",
-      "Cancelled",
-    ];
-
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid order status",
-      });
+    // Explicitly update only the underlying real properties
+    if (paymentStatus) {
+      const validPaymentStatuses = ["Pending", "Verifying", "Paid", "Failed", "Refund Pending", "Refunded"];
+      if (!validPaymentStatuses.includes(paymentStatus)) {
+        return res.status(400).json({ success: false, message: "Invalid payment status" });
+      }
+      order.payment.status = paymentStatus;
     }
 
-    order.orderStatus = status;
+    if (shippingStatus) {
+      const validShippingStatuses = ["Pending", "Shipment Created", "Pickup Scheduled", "Picked Up", "In Transit", "Out For Delivery", "Delivered", "Cancelled", "Returned"];
+      if (!validShippingStatuses.includes(shippingStatus)) {
+        return res.status(400).json({ success: false, message: "Invalid shipping status" });
+      }
+      order.shipping.status = shippingStatus;
+    }
 
     await order.save();
-
-    return res.status(200).json({
-      success: true,
-      order,
-    });
+    return res.status(200).json({ success: true, order });
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
