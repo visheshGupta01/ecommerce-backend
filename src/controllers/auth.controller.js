@@ -43,7 +43,7 @@ export const registerUser = async (req, res) => {
       message: "User registered successfully",
       token,
       user: {
-        id: user._id,
+        _id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
@@ -99,7 +99,7 @@ export const loginUser = async (req, res) => {
       message: "Login successful",
       token,
       user: {
-        id: user._id,
+        _id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
@@ -116,8 +116,10 @@ export const loginUser = async (req, res) => {
 };
 
 export const getMe = async (req, res) => {
+  const user = await User.findById(req.user._id).select("-password");
+
   res.status(200).json({
     success: true,
-    user: req.user,
+    user,
   });
 };

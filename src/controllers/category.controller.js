@@ -1,3 +1,6 @@
+import Category from "../models/Category.js";
+import { uploadToCloudinary } from "../utils/uploadToCloudinary.js";
+
 export const createCategory = async (req, res) => {
   try {
     const { name, slug, description } = req.body;
@@ -13,11 +16,22 @@ export const createCategory = async (req, res) => {
       });
     }
 
+    let image = null;
+
+    if (req.file) {
+      const result = await uploadToCloudinary(req.file.buffer, "categories");
+
+      image = {
+        url: result.secure_url,
+        public_id: result.public_id,
+      };
+    }
+
     const category = await Category.create({
       name,
       slug,
       description,
-      image: req.body.image,
+      image,
     });
 
     res.status(201).json({

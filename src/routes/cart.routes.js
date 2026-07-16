@@ -11,14 +11,15 @@ import {
 
 const router = express.Router();
 
-router.post("/add", authMiddleware, addToCart);
+router.post("/items", authMiddleware, addToCart);
 
 router.get("/", authMiddleware, getCart);
 
-router.put("/update", authMiddleware, updateCartItem);
+router.delete("/", authMiddleware, clearCart);
 
-router.delete("/remove/:productId", authMiddleware, removeCartItem);
+router.put("/items/:productId", authMiddleware, updateCartItem);
 
-router.delete("/clear", authMiddleware, clearCart);
+router.delete("/items/:productId", authMiddleware, removeCartItem);
+
 
 export default router;

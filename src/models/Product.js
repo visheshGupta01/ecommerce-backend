@@ -61,6 +61,47 @@ const productSchema = new mongoose.Schema(
     brand: {
       type: String,
       trim: true,
+      index: true,
+    },
+
+    shipping: {
+      weight: {
+        type: Number,
+        required: true,
+        min: 0,
+        default: 0.5,
+      },
+
+      length: {
+        type: Number,
+        required: true,
+        min: 0,
+        default: 10,
+      },
+
+      breadth: {
+        type: Number,
+        required: true,
+        min: 0,
+        default: 10,
+      },
+
+      height: {
+        type: Number,
+        required: true,
+        min: 0,
+        default: 10,
+      },
+
+      hsnCode: {
+        type: String,
+        trim: true,
+      },
+
+      isShippable: {
+        type: Boolean,
+        default: true,
+      },
     },
 
     images: [
@@ -113,5 +154,35 @@ const productSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+productSchema.index({
+  name: "text",
+  description: "text",
+  brand: "text",
+});
+
+productSchema.index({
+  category: 1,
+});
+
+productSchema.index({
+  subCategory: 1,
+});
+
+productSchema.index({
+  price: 1,
+});
+
+productSchema.index({
+  isFeatured: 1,
+});
+
+productSchema.index({
+  isActive: 1,
+});
+
+productSchema.index({
+  averageRating: -1,
+});
 
 export default mongoose.model("Product", productSchema);

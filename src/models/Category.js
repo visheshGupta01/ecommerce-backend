@@ -1,3 +1,5 @@
+import mongoose from "mongoose";
+
 const categorySchema = new mongoose.Schema(
   {
     name: {
@@ -17,8 +19,14 @@ const categorySchema = new mongoose.Schema(
     description: String,
 
     image: {
-      url: String,
-      public_id: String,
+      url: {
+        type: String,
+        default: "",
+      },
+      public_id: {
+        type: String,
+        default: "",
+      },
     },
 
     isActive: {

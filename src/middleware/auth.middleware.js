@@ -26,7 +26,7 @@ const authMiddleware = async (req, res, next) => {
     // Get user from DB
     const user = await User.findById(decoded.userId).select("-password");
 
-    if (!user) {
+    if (!user || !user.isActive) {
       return res.status(401).json({
         success: false,
         message: "User not found",
