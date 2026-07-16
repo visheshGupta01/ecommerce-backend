@@ -1,5 +1,7 @@
 import Cart from "../models/Cart.js";
 import Order from "../models/Order.js";
+import crypto from "crypto";
+import razorpayInstance from "../config/razorpay.js"; // Assuming your configuration exports the instance
 
 import {
   prepareOrderData,
@@ -13,6 +15,8 @@ import {
   verifyRazorpayPayment,
   verifyWebhookSignature,
 } from "../services/payment.service.js";
+
+import razorpay from "../config/razorpay.js";
 
 export const createPaymentOrder = async (req, res) => {
   try {
@@ -82,16 +86,13 @@ export const createPaymentOrder = async (req, res) => {
   }
 };
 
-import crypto from "crypto";
-import Order from "../models/Order.js";
-import Cart from "../models/Cart.js";
-import { completeOrder } from "../services/order.service.js";
-import razorpayInstance from "../config/razorpay.js"; // Assuming your configuration exports the instance
 
 export const verifyPayment = async (req, res) => {
   try {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } =
       req.body;
+    
+    console.log(req.body)
 
     // 1. Find the internal order using the atomic lifecycle status check
     const order = await Order.findOneAndUpdate(
@@ -100,8 +101,9 @@ export const verifyPayment = async (req, res) => {
         "payment.status": "Pending",
       },
       { $set: { "payment.status": "Verifying" } },
-      { new: false }, // Returns the document BEFORE update so we can reference its initial status
+      { new: false },
     );
+
 
     if (!order) {
       return res.status(400).json({
@@ -129,7 +131,9 @@ export const verifyPayment = async (req, res) => {
     // 3. SECURE PARAMETER VERIFICATION VIA RAZORPAY API Fetch
     // We fetch the server-to-server transaction context directly from Razorpay's API
     const razorpayOrderFetch =
-      await razorpayInstance.orders.fetch(razorpay_order_id);
+      await razorpay.orders.fetch(razorpay_order_id);
+    
+    console.log(razorpayOrderFetch)
 
     // Verify order id match (Implicitly handled by fetch, but good explicitly checking properties)
     if (razorpayOrderFetch.id !== order.payment.razorpayOrderId) {
@@ -168,20 +172,14 @@ export const verifyPayment = async (req, res) => {
         });
     }
 
-    // 4. Retrieve User Cart to pass forward
-    const cart = await Cart.findOne({ user: order.user });
-    if (!cart) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Cart not found" });
-    }
-
     // 5. Complete Order via isolated transaction layer (Using snapshot pattern)
     const completedOrder = await completeOrder({
       order,
       razorpayPaymentId: razorpay_payment_id,
       razorpaySignature: razorpay_signature,
     });
+
+    console.log(completeOrder)
 
     return res.status(200).json({
       success: true,
@@ -195,6 +193,7 @@ export const verifyPayment = async (req, res) => {
 };
 
 export const razorpayWebhook = async (req, res) => {
+  console.log("Webhook Called")
   try {
     if (
       !verifyWebhookSignature(req.body, req.headers["x-razorpay-signature"])
@@ -206,6 +205,7 @@ export const razorpayWebhook = async (req, res) => {
 
     switch (event.event) {
       case "payment.captured": {
+        console.log("Payment Captured")
         const payment = event.payload.payment.entity;
 
         // Atomically claim the order
@@ -296,5 +296,41 @@ export const razorpayWebhook = async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.sendStatus(500);
+  }
+};
+
+// Add this export to src/controllers/payment.controller.js
+
+export const getPaymentStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    // Securely find the order targeting the active user context
+    const order = await Order.findOne({
+      _id: orderId,
+      user: req.user._id, // Enforces that customers can only poll their own order statuses
+    });
+
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    // Return the response matching the frontend wrapper schema structure
+    return res.status(200).json({
+      success: true,
+      data: {
+        status: order.payment.status, // "Pending", "Verifying", "Paid", "Failed"
+        failureReason: order.payment.failureReason || null
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };

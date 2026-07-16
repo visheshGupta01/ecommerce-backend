@@ -24,30 +24,30 @@ export const getMyOrders = async (req, res) => {
 
 export const getOrderById = async (req, res) => {
   try {
+    // 1. Initialize the filter query object with the order ID parameter
+    const query = { _id: req.params.id };
+
+    // 2. If the user is a standard customer, restrict the lookup to their own orders.
+    // Admins skip this block, allowing them to lookup any order across the platform.
     if (req.user.role !== "admin") {
       query.user = req.user._id;
     }
 
-    const order = await Order.findOne({
-      _id: req.params.id,
-      user: req.user._id,
-    }).populate("user", "name email");
+    const order = await Order.findOne(query).populate("user", "name email");
 
+    // 3. Handle when the order doesn't exist or doesn't belong to the requesting customer
     if (!order) {
       return res.status(404).json({
         success: false,
         message: "Order not found",
       });
-
-      if (!order) {
-        throw new Error("Order not found");
-      }
-
-      return res.status(200).json({
-        success: true,
-        order,
-      });
     }
+
+    // 4. Return the successful response safely OUTSIDE the condition block
+    return res.status(200).json({
+      success: true,
+      order,
+    });
   } catch (error) {
     return res.status(500).json({
       success: false,

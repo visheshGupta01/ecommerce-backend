@@ -113,8 +113,8 @@ export const completeOrder = async ({
   razorpayPaymentId,
   razorpaySignature,
 }) => {
+  console.log("Complete Order")
   const session = await mongoose.startSession();
-
   try {
     let completedOrder;
 

@@ -1,16 +1,48 @@
-import "dotenv/config";
-import app from "./app.js";
-import connectDB from "./config/db.js";
-import { initOrderCleanupCron } from "./cron/orderCleanup.cron.js"; // 1. Import the cron utility
+import cron from "node-cron";
+import Order from "../models/Order.js";
 
-const PORT = process.env.PORT || 3000;
+/**
+ * CRON Job to clean up expired orders
+ * Runs every hour to mark orders that have been stuck in 'Pending' payment status
+ * for more than 2 hours as 'Failed'.
+ */
+export const initOrderCleanupCron = () => {
+  // Runs every hour at minute 0 (0 * * * *)
+  cron.schedule("0 * * * *", async () => {
+    console.log("⏰ Running Expired Order Cleanup CRON Job...");
 
-// Connect to Database
-connectDB();
+    try {
+      // Define your expiration window (e.g., 2 hours ago)
+      const expirationThreshold = new Date();
+      expirationThreshold.setHours(expirationThreshold.getHours() - 2);
 
-// Initialize CRON Jobs
-initOrderCleanupCron(); // 2. Start the cron job scheduler
+      // Find and update all orders matching the criteria
+      const result = await Order.updateMany(
+        {
+          "payment.status": "Pending",
+          createdAt: { $lt: expirationThreshold },
+        },
+        {
+          $set: {
+            "payment.status": "Failed",
+            "payment.failureReason":
+              "Payment session timed out / order expired",
+          },
+        },
+      );
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+      if (result.modifiedCount > 0) {
+        console.log(
+          `✅ Cleaned up ${result.modifiedCount} expired pending orders.`,
+        );
+      } else {
+        console.log("ℹ️ No expired pending orders found.");
+      }
+    } catch (error) {
+      console.error(
+        "❌ Error running Expired Order Cleanup CRON Job:",
+        error.message,
+      );
+    }
+  });
+};
