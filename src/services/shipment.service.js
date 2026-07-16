@@ -1,19 +1,14 @@
 import shiprocket from "../config/shiprocket.js";
 
 export const createShipment = async (order) => {
-
-  console.log("Function Called")
   if (order.shipping.shipmentId) {
     return order.shipping;
   }
 
   const payload = {
     order_id: order.orderNumber,
-
     order_date: order.createdAt,
-
     pickup_location: process.env.SHIPROCKET_PICKUP_LOCATION,
-
     billing_customer_name: order.shippingAddress.fullName,
     billing_last_name: "",
     billing_address: order.shippingAddress.address,
@@ -21,42 +16,26 @@ export const createShipment = async (order) => {
     billing_pincode: order.shippingAddress.pincode,
     billing_state: order.shippingAddress.state,
     billing_country: "India",
-
     billing_email: order.user.email,
     billing_phone: order.shippingAddress.phone,
-
     shipping_is_billing: true,
-
     order_items: order.items.map((item) => ({
       name: item.name,
       sku: item.sku,
       units: item.quantity,
       selling_price: item.price,
     })),
-
     payment_method: order.payment.provider === "cod" ? "COD" : "Prepaid",
-
     sub_total: order.pricing.subtotal,
     shipping_charges: order.pricing.shippingCost,
     total_discount: order.pricing.discount,
-
-    // TODO: Calculate these from products
     length: order.shipping.package.length,
-
     breadth: order.shipping.package.breadth,
-
     height: order.shipping.package.height,
-
     weight: order.shipping.package.weight,
   };
 
-  console.log(shipment)
-
-
   const { data } = await shiprocket.post("/orders/create/adhoc", payload);
-
-  console.log(JSON.stringify(data, null, 2));
-
   const shipment = data.payload ?? data;
 
   order.shipping.provider = "shiprocket";
@@ -67,9 +46,9 @@ export const createShipment = async (order) => {
   order.shipping.courier = shipment.courier_name;
   order.shipping.trackingUrl = `https://shiprocket.co/tracking/${shipment.awb_code}`;
   order.shipping.estimatedDelivery = shipment.estimated_delivery_days ?? null;
-  order.shipping.courierId = shipment.courier_company_id; 
-  await order.save();
+  order.shipping.courierId = shipment.courier_company_id;
 
+  await order.save();
   return shipment;
 };
 
@@ -131,7 +110,6 @@ export const calculateShippingRates = async ({
   products,
   destinationPincode,
 }) => {
-
   for (const item of products) {
     if (!item.product.shipping?.isShippable) {
       throw new Error(`${item.product.name} requires quotation`);
