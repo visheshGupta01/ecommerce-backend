@@ -12,6 +12,7 @@ import adminRoutes from "./routes/admin.routes.js"
 import userRoutes from "./routes/user.routes.js"
 import paymentRoutes from "./routes/payment.routes.js"
 import shipmentRoutes from "./routes/shipment.routes.js"
+import quoteRoutes from "./routes/quote.routes.js";
 import { razorpayWebhook } from "./controllers/payment.controller.js";
 
 
@@ -46,6 +47,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/payment", paymentRoutes)
 app.use("/api/shipment", shipmentRoutes)
+app.use("/api/quote", quoteRoutes)
 
 
 export default app;
