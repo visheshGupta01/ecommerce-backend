@@ -40,3 +40,41 @@ export const createQuoteRequest = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
+
+export const getAllQuotes = async (req, res) => {
+  try {
+    const quotes = await Quote.find()
+      .populate("product", "name sku price images")
+      .populate("user", "name email")
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({ success: true, quotes });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const updateQuoteStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, adminNotes } = req.body;
+
+    const quote = await Quote.findById(id);
+    if (!quote) {
+      return res.status(404).json({ success: false, message: "Quote not found" });
+    }
+
+    if (status) quote.status = status;
+    if (adminNotes !== undefined) quote.adminNotes = adminNotes;
+
+    await quote.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Quote request status updated",
+      quote,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};

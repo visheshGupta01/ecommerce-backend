@@ -2,11 +2,13 @@ import Product from "../models/Product.js";
 import Category from "../models/Category.js";
 import User from "../models/User.js";
 import Order from "../models/Order.js";
+import Quote from "../models/Quote.js"; // Included new Quote model
 
 export const getDashboard = async (req, res) => {
   const sixMonthsAgo = new Date();
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
   sixMonthsAgo.setDate(1);
+
   try {
     const [
       totalProducts,
@@ -19,30 +21,34 @@ export const getDashboard = async (req, res) => {
       processingOrders,
       shippedOrders,
       deliveredOrders,
+      totalQuotes,
+      pendingQuotes,
       revenue,
       salesChart,
       topProducts,
       recentOrders,
     ] = await Promise.all([
+      // 1. Product Counts
       Product.countDocuments(),
+      Product.countDocuments({ isActive: true }),
+      Product.countDocuments({ stock: 0 }),
 
-      Product.countDocuments({
-        isActive: true,
-      }),
-
-      Product.countDocuments({
-        stock: 0,
-      }),
-
+      // 2. Category & User Counts
       Category.countDocuments(),
+      User.countDocuments({ role: "customer" }),
 
-      User.countDocuments({
-        role: "customer",
-      }),
-
+      // 3. Order Breakdown Counts
       Order.countDocuments(),
+      Order.countDocuments({ "shipping.status": "Pending" }),
+      Order.countDocuments({ "shipping.status": "Processing" }),
+      Order.countDocuments({ "shipping.status": "Shipped" }),
+      Order.countDocuments({ "shipping.status": "Delivered" }),
 
-      // Total Revenue
+      // 4. B2B Quote Metrics (New)
+      Quote.countDocuments(),
+      Quote.countDocuments({ status: "Pending" }),
+
+      // 5. Total Revenue Aggregation
       Order.aggregate([
         {
           $match: {
@@ -59,7 +65,7 @@ export const getDashboard = async (req, res) => {
         },
       ]),
 
-      // Monthly Sales Chart
+      // 6. Monthly Sales Chart Data
       Order.aggregate([
         {
           $match: {
@@ -72,19 +78,11 @@ export const getDashboard = async (req, res) => {
         {
           $group: {
             _id: {
-              year: {
-                $year: "$createdAt",
-              },
-              month: {
-                $month: "$createdAt",
-              },
+              year: { $year: "$createdAt" },
+              month: { $month: "$createdAt" },
             },
-            revenue: {
-              $sum: "$pricing.total",
-            },
-            orders: {
-              $sum: 1,
-            },
+            revenue: { $sum: "$pricing.total" },
+            orders: { $sum: 1 },
           },
         },
         {
@@ -123,7 +121,7 @@ export const getDashboard = async (req, res) => {
         },
       ]),
 
-      // Top Selling Products
+      // 7. Top Selling Products Aggregation
       Order.aggregate([
         {
           $match: {
@@ -165,7 +163,7 @@ export const getDashboard = async (req, res) => {
             _id: "$product._id",
             name: "$product.name",
             image: {
-              $arrayElemAt: ["$product.images.url", 0],
+              $arrayElemAt: ["$product.images", 0],
             },
             sold: 1,
             price: {
@@ -177,18 +175,16 @@ export const getDashboard = async (req, res) => {
         },
       ]),
 
-      // Recent Orders
+      // 8. Recent Orders Overview List
       Order.find()
-        .sort({
-          createdAt: -1,
-        })
+        .sort({ createdAt: -1 })
         .limit(5)
         .populate("user", "name email")
-        .select("orderNumber user pricing orderStatus createdAt")
+        .select("orderNumber user pricing payment shipping createdAt")
         .lean(),
     ]);
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       dashboard: {
         stats: {
@@ -203,17 +199,16 @@ export const getDashboard = async (req, res) => {
           processingOrders,
           shippedOrders,
           deliveredOrders,
+          totalQuotes,
+          pendingQuotes,
         },
-
         salesChart,
-
         topProducts,
-
         recentOrders,
       },
     });
   } catch (error) {
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: error.message,
     });

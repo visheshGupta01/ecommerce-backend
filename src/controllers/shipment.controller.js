@@ -30,6 +30,7 @@ export const createShipment = async (req, res) => {
     }
 
     const shipment = await createShipmentService(order);
+    console.log(shipment)
     return res
       .status(201)
       .json({

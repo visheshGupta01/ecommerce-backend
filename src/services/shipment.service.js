@@ -35,8 +35,17 @@ export const createShipment = async (order) => {
     weight: order.shipping.package.weight,
   };
 
+  console.log(payload);
+
   const { data } = await shiprocket.post("/orders/create/adhoc", payload);
   const shipment = data.payload ?? data;
+
+  const shipmentId = shipment.shipment_id;
+
+  let awbCode = shipment.awb_code || "";
+  let courierName = shipment.courier_name || "";
+
+  console.log(data);
 
   order.shipping.provider = "shiprocket";
   order.shipping.status = "Shipment Created";
@@ -48,14 +57,51 @@ export const createShipment = async (order) => {
   order.shipping.estimatedDelivery = shipment.estimated_delivery_days ?? null;
   order.shipping.courierId = shipment.courier_company_id;
 
+  // 2. AUTO-ASSIGN AWB (If AWB code was not returned in creation payload)
+  if (!awbCode && shipmentId) {
+    try {
+      const awbResponse = await shiprocket.post(
+        "https://apiv2.shiprocket.in/v1/external/courier/assign/awb",
+        { shipment_id: shipmentId },
+      );
+
+      console.log(awbResponse)
+
+      if (awbResponse.data?.awb_assign_status === 1) {
+        awbCode = awbResponse.data.response.data.awb_code;
+        courierName = awbResponse.data.response.data.courier_name;
+      }
+    } catch (awbError) {
+      console.warn(
+        "AWB Auto-assignment notice:",
+        awbError.response?.data || awbError.message,
+      );
+    }
+  }
+
+  // 3. Persist shipment metrics back to order MongoDB document
+  order.shipping = {
+    ...order.shipping,
+    shipmentId: shipmentId,
+    awbCode: awbCode,
+    courierName: courierName,
+    status: "Shipment Created",
+    trackingUrl: awbCode ? `https://shiprocket.co/tracking/${awbCode}` : "",
+  };
+
   await order.save();
   return shipment;
-};
+};;;
 
 export const schedulePickup = async (shipmentId) => {
-  const { data } = await shiprocket.post("/courier/generate/pickup", {
+  try{const { data } = await shiprocket.post("/courier/generate/pickup", {
     shipment_id: [shipmentId],
   });
+    console.log(data)
+  }
+  catch(err) {
+    console.log(err.response.data)
+  }
 
   return data;
 };
