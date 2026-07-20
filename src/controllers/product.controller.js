@@ -249,9 +249,6 @@ export const getProductById = async (req, res) => {
 export const updateProduct = async (req, res) => {
   const uploadedImages = [];
 
-  console.log("BODY", req.body);
-  console.log("FILES", req.files?.length);
-
   try {
     const product = await Product.findById(req.params.id);
 
@@ -265,7 +262,6 @@ export const updateProduct = async (req, res) => {
     // Validate category
     if (req.body.category) {
       const categoryExists = await Category.findById(req.body.category);
-
       if (!categoryExists) {
         return res.status(404).json({
           success: false,
@@ -276,65 +272,117 @@ export const updateProduct = async (req, res) => {
 
     // Parse specifications
     if (req.body.specifications) {
-      req.body.specifications = JSON.parse(req.body.specifications);
+      req.body.specifications =
+        typeof req.body.specifications === "string"
+          ? JSON.parse(req.body.specifications)
+          : req.body.specifications;
     }
+
+    // Reconstruct Nested Shipping Object from FormData
+    if (req.body["shipping[isShippable]"] !== undefined || req.body.shipping) {
+      const isShippable =
+        req.body["shipping[isShippable]"] !== undefined
+          ? req.body["shipping[isShippable]"] === "true"
+          : (req.body.shipping?.isShippable ?? product.shipping?.isShippable);
+
+      const weight = Number(
+        req.body["shipping[package][weight]"] ||
+          product.shipping?.package?.weight ||
+          0.5,
+      );
+      const length = Number(
+        req.body["shipping[package][length]"] ||
+          product.shipping?.package?.length ||
+          10,
+      );
+      const width = Number(
+        req.body["shipping[package][width]"] ||
+          product.shipping?.package?.width ||
+          10,
+      );
+      const height = Number(
+        req.body["shipping[package][height]"] ||
+          product.shipping?.package?.height ||
+          10,
+      );
+
+      req.body.shipping = {
+        isShippable,
+        package: { weight, length, width, height },
+      };
+
+      delete req.body["shipping[isShippable]"];
+      delete req.body["shipping[package][weight]"];
+      delete req.body["shipping[package][length]"];
+      delete req.body["shipping[package][width]"];
+      delete req.body["shipping[package][height]"];
+    }
+
+    // Parse image removal list from req.body
+    let removedImagePublicIds = [];
+    if (req.body.removedImagePublicIds) {
+      try {
+        removedImagePublicIds =
+          typeof req.body.removedImagePublicIds === "string"
+            ? JSON.parse(req.body.removedImagePublicIds)
+            : req.body.removedImagePublicIds;
+      } catch (err) {
+        removedImagePublicIds = [];
+      }
+      delete req.body.removedImagePublicIds;
+    }
+
+    // 1. Filter existing images (keep ones that were NOT marked for removal)
+    let currentImages = (product.images || []).filter(
+      (img) => !removedImagePublicIds.includes(img.public_id),
+    );
+
+    // 2. Upload and append new images if any are uploaded
+    if (req.files && req.files.length > 0) {
+      const newImages = [];
+      for (const file of req.files) {
+        const result = await uploadToCloudinary(file.buffer);
+        uploadedImages.push(result);
+        newImages.push({
+          url: result.secure_url,
+          public_id: result.public_id,
+        });
+      }
+      currentImages = [...currentImages, ...newImages];
+    }
+
+    req.body.images = currentImages;
 
     // Generate new slug if name changed
     if (req.body.name && req.body.name !== product.name) {
       req.body.slug = await generateUniqueSlug(req.body.name);
     }
 
-    let oldImages = [];
-
-    // Replace images if new ones are uploaded
-    if (req.files && req.files.length > 0) {
-      const imageUrls = [];
-
-      for (const file of req.files) {
-        const result = await uploadToCloudinary(file.buffer);
-
-        uploadedImages.push(result);
-
-        imageUrls.push({
-          url: result.secure_url,
-          public_id: result.public_id,
-        });
-      }
-
-      oldImages = product.images;
-      req.body.images = imageUrls;
-    }
-
     Object.assign(product, req.body);
-
-    console.log(product);
-
     await product.save();
 
-    // Delete old images only after successful save
-    for (const image of oldImages) {
-      await cloudinary.uploader.destroy(image.public_id);
+    // 3. Delete ONLY the removed old images from Cloudinary after successful DB save
+    for (const publicId of removedImagePublicIds) {
+      try {
+        await cloudinary.uploader.destroy(publicId);
+      } catch (destroyError) {
+        console.error("Cloudinary deletion warning:", destroyError.message);
+      }
     }
 
-    await product.populate([
-      {
-        path: "category",
-      },
-      {
-        path: "subCategory",
-      },
-    ]);
-
-    console.log("saved");
+    await product.populate([{ path: "category" }, { path: "subCategory" }]);
 
     return res.status(200).json({
       success: true,
+      message: "Product updated successfully",
       product,
     });
   } catch (error) {
-    // Roll back newly uploaded images
+    // Roll back any newly uploaded images on error
     for (const image of uploadedImages) {
-      await cloudinary.uploader.destroy(image.public_id);
+      if (image.public_id) {
+        await cloudinary.uploader.destroy(image.public_id);
+      }
     }
 
     return res.status(500).json({
