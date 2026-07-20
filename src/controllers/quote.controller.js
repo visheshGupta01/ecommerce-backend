@@ -61,7 +61,9 @@ export const updateQuoteStatus = async (req, res) => {
 
     const quote = await Quote.findById(id);
     if (!quote) {
-      return res.status(404).json({ success: false, message: "Quote not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Quote not found" });
     }
 
     if (status) quote.status = status;
@@ -76,5 +78,23 @@ export const updateQuoteStatus = async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const getMyQuotes = async (req, res) => {
+  try {
+    const quotes = await Quote.find({ user: req.user._id })
+      .populate("product", "name sku price images")
+      .sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      quotes,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
