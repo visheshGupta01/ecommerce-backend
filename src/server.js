@@ -5,10 +5,19 @@ import { initOrderCleanupCron } from "./utils/orderCleanup.cron.js";
 
 const PORT = process.env.PORT || 3000;
 
-connectDB();
+const startServer = async () => {
+  try {
+    await connectDB();
 
-initOrderCleanupCron();
+    initOrderCleanupCron();
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
+  } catch (err) {
+    console.error("Failed to start server:", err);
+    process.exit(1);
+  }
+};
+
+startServer();

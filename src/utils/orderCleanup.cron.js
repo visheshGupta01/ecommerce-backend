@@ -7,6 +7,7 @@ import Order from "../models/Order.js";
  * for more than 2 hours as 'Failed'.
  */
 export const initOrderCleanupCron = () => {
+  console.log("🧹 Order cleanup cron initialized.");
   // Runs every hour at minute 0 (0 * * * *)
   cron.schedule("0 * * * *", async () => {
     console.log("⏰ Running Expired Order Cleanup CRON Job...");
@@ -14,7 +15,7 @@ export const initOrderCleanupCron = () => {
     try {
       // Define your expiration window (e.g., 2 hours ago)
       const expirationThreshold = new Date();
-      expirationThreshold.setHours(expirationThreshold.getHours() - 2);
+      expirationThreshold.setHours(expirationThreshold.getHours() -  2);
 
       // Find and update all orders matching the criteria
       const result = await Order.updateMany(
