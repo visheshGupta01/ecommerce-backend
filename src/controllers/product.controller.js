@@ -2,7 +2,7 @@ import Product from "../models/Product.js";
 import Category from "../models/Category.js";
 import { uploadToCloudinary } from "../utils/uploadToCloudinary.js";
 import { v2 as cloudinary } from "cloudinary";
-import { generateUniqueSlug } from "../utils/slugGenerator.js"
+import { generateUniqueSlug } from "../utils/slugGenerator.js";
 
 export const createProduct = async (req, res) => {
   const uploadedImages = [];
@@ -32,15 +32,17 @@ export const createProduct = async (req, res) => {
       uploadedImages.push(result);
     }
 
-    
     const slug = await generateUniqueSlug(req.body.name);
-
 
     if (req.body.specifications) {
       req.body.specifications = JSON.parse(req.body.specifications);
     }
 
-    const product = await Product.create({ ...req.body,slug:slug, images: imageUrls });
+    const product = await Product.create({
+      ...req.body,
+      slug: slug,
+      images: imageUrls,
+    });
 
     res.status(201).json({
       success: true,
@@ -225,8 +227,9 @@ export const getAllProducts = async (req, res) => {
 
 export const getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id).populate("category").populate("subCategory")
-;
+    const product = await Product.findById(req.params.id)
+      .populate("category")
+      .populate("subCategory");
     if (!product) {
       return res.status(404).json({
         success: false,
@@ -308,7 +311,10 @@ export const updateProduct = async (req, res) => {
 
       req.body.shipping = {
         isShippable,
-        package: { weight, length, width, height },
+        weight,
+        length,
+        breadth,
+        height,
       };
 
       delete req.body["shipping[isShippable]"];
@@ -378,6 +384,7 @@ export const updateProduct = async (req, res) => {
       product,
     });
   } catch (error) {
+    console.log(error.stack)
     // Roll back any newly uploaded images on error
     for (const image of uploadedImages) {
       if (image.public_id) {
